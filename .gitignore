@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code per-user settings
+.claude/
+
+# Experiment artifacts
+checkpoints/
+runs/
+wandb/
+outputs/
+.cache/
+
+# Large data — never commit
+data/
+!data/synthetic/README.md
+
+# Vendored / local tool checkouts
+deps/
+cmu_us_awb_arctic/wav/
+cmu_us_awb_arctic/lpc/
+cmu_us_awb_arctic/mcep/
+
+# Lit review PDFs
+litt/**/*.pdf
+
+# Personal documents (private narrative drafts, audit reports, etc.)
+*.docx
+*.doc
+docs/proposal/*audit*.md
+docs/proposal/*review*.md
+docs/proposal/*robustness*.md
+docs/proposal/*novelty*.md
+docs/proposal/*falsifiability*.md
+docs/proposal/*H_Statement*
+
+# Build outputs for the LaTeX proposal
+docs/proposal/*.aux
+docs/proposal/*.log
+docs/proposal/*.out
+docs/proposal/*.toc
+docs/proposal/*.bbl
+docs/proposal/*.blg
+docs/proposal/*.synctex.gz

@@ -1,0 +1,505 @@
+\documentclass[11pt,letterpaper]{article}
+
+% --- Packages ----------------------------------------------------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{authblk}
+\usepackage[numbers,sort&compress,square]{natbib}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
+\setlist[itemize]{itemsep=2pt,topsep=4pt}
+\setlist[enumerate]{itemsep=2pt,topsep=4pt}
+
+% Compact tabular spacing
+\renewcommand{\arraystretch}{1.15}
+
+% --- Title -------------------------------------------------------------------
+\title{\vspace{-0.4in}\textbf{Prosody-Internalized Language Models:\\
+Toward a Prosody-Aware Foundation for Language Modelling}}
+
+\author[1]{Felipe Imbelissieri-Casadei}
+\affil[1]{Department of Linguistics, University of Washington \\ \texttt{faic@uw.edu}}
+
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\vspace{-0.3in}
+
+\begin{abstract}
+\noindent
+Modern transformer language models trained on text alone have absorbed an enormous amount of the structure that text-distribution statistics encode, but they have never been exposed to the prosodic information that human language users routinely access. I propose a research programme to determine whether changing that --- introducing continuous syllable-level prosody as a parallel sub-word stream during pretraining --- produces representations that survive at text-only inference and improve downstream language-modelling performance. The motivation rests on a substantial developmental literature establishing that prosody is centrally involved in human language processing well before phonetic categories stabilise, together with recent quantitative evidence that prosody and text carry partially redundant but non-identical information. The long-term goal is a prosody-aware foundation model: a language model whose pretraining included prosodic structure at the right granularity, and which at text-only inference exploits prosodic priors to support dialogue understanding, pragmatic inference, prosodically-conveyed clinical signals, and tasks that current text-only models systematically miss. The architecture I advance, Prosody-Internalized Language Models (PILM), fuses a continuous 18-dimensional parametric prosody vector at the syllable level with a phone-tier segmental stream, trained with modality dropout to permit a clean comparison against a same-compute text-only baseline. Preliminary results on MELD and AMI demonstrate that the parametric vector encodes question-marking and affect-marking prosody at phonetically interpretable values, with bootstrap-stable coefficients matching textbook English yes/no question phonetics. These results function as scaffolding for the central discovery experiment, planned on Switchboard NXT once institutional licensing clears. The proposal articulates the theoretical foundation, the goals and potential consequences of a fully prosody-aware language model, the architecture and the experiments completed and planned in service of those goals, and the next steps in this research programme.
+\end{abstract}
+
+% =============================================================================
+\section{Theoretical Foundation}\label{sec:theory}
+
+\subsection{Prosody is load-bearing in human language processing}
+
+A substantial developmental literature establishes that prosody is among the earliest linguistic signals an infant attends to and remains a load-bearing component of language processing throughout the lifespan. Prosodic regularities --- the rhythmic, intonational, and durational patterns of speech --- are tracked by prelinguistic infants before phonetic categories stabilise, and prosodic boundaries scaffold the segmentation of words from continuous speech \citep{prieto2018}. Children deploy prosodic cues to resolve referential ambiguity in real time: \citet{snedeker2003} showed that listeners integrate the speaker's intonational structure with referential context to decide between competing parses on the order of hundreds of milliseconds. Adult listeners treat intonational structure as a discourse-management apparatus: \citet{hirschberg1986} demonstrated that intonational phrasing systematically encodes attentional focus and intentional structure in dialogue, and \citet{beckman1996} formalised the consequence as the claim that prosodic structure is itself parsed during language comprehension, on a parallel track to syntactic structure.
+
+This developmental and processing literature dovetails with a broader framework on the structure of human cognition. \citet{spelke2007} and \citet{spelke2022} argue that human cognition is built upon a small set of \emph{core knowledge} systems, present at or near birth, which scaffold the acquisition of more complex representations. Prosody plausibly serves a closely analogous role for language: regularities of pitch, rhythm, and pause are accessible to the prelinguistic infant before lexical structure is in place, and they continue to be exploited by adult listeners to organise attention and disambiguate meaning. \citet{lake2017} make the engineering implication explicit: machines that learn and think like humans must incorporate the priors that human learners have access to. The present research applies this argument to language modelling specifically.
+
+\subsection{Autosegmental-metrical theory and the syllable as the unit of analysis}
+
+The phonological framework underlying my approach is the autosegmental-metrical (AM) theory of intonation \citep{pierrehumbert1980, beckman1986, pierrehumbert1990}. AM theory analyses an intonational contour as a sequence of tonal events --- high or low pitch targets ($H^*$ and $L^*$, with composite forms $L+H^*$, $L^*+H$, and the like) --- aligned to syllabic and prosodic-phrasal landmarks. The Tones-and-Break-Indices (ToBI) labelling system \citep{silverman1992, beckman1997} operationalises AM categories for transcription. Two structural commitments of AM theory shape the architecture I propose. First, prosodic events are anchored at the \emph{syllable}: a pitch accent docks to a stressed syllable's nucleus, a boundary tone aligns with the right edge of a prosodic phrase, and the within-syllable alignment of the F0 peak distinguishes accent types. Second, prosody is \emph{speaker-relative}: an $H^*$ is high relative to the speaker's pitch range, not in absolute Hertz, and listeners consume pitch in a speaker-relative frame \citep{honorof2005}.
+
+The syllable level is therefore the natural unit at which to fuse prosody with a segmental representation. Anchoring prosody at the phone forces awkward replication or interpolation; anchoring at the word loses within-word peak alignment that distinguishes $L+H^*$ from $H^*$; anchoring at frame-level F0 forces the model to rediscover syllabic structure that the linguistic system already encodes.
+
+\subsection{The implicit-prosody literature as related background}
+
+A separate body of psycholinguistic work has investigated whether silent readers reconstruct a covert prosodic representation. \citet{fodor2002} observed that readers' interpretation of structurally ambiguous sentences (e.g.\ relative-clause attachment) systematically tracks the prosodic structure they would have produced in overt speech. \citet{breen2014review} reviews two decades of behavioural evidence: such implicit prosody affects reading time, syntactic parsing preferences, and resolution of focus-sensitive constructions. The phenomenon is well-documented across paradigms (eye-tracking, self-paced reading, ERP) and across languages, with three important qualifications: effect sizes vary substantially with individual differences in working memory and pragmatic skill \citep{bishop2021, jun2010}; the most dependable effects sit in late reading-time measures; and \citet{jun2010} showed that the explicit prosody English speakers produce in laboratory tasks sometimes predicts the opposite of the observed implicit-prosody attachment preferences. Recent ERP evidence \citep{glushko2022} provides additional support for an on-line prosodic representation during silent reading.
+
+I reference this literature as theoretical scaffolding rather than as the falsification target of the present investigation. The empirical question advanced here --- whether prosody-aware pretraining produces text-only inference advantages over a same-compute text-only baseline --- is a discovery question about neural pretraining, distinct from the question of whether human silent readers construct prosodic representations. A positive result would carry implications for the implicit-prosody literature; a negative result would not refute it, since the proposed architecture and training regime are not faithful models of human language acquisition.
+
+\subsection{Information-theoretic redundancy between prosody and text}
+
+Recent quantitative work has established that prosody and text carry partially redundant but non-identical information. \citet{wolf2023, wolf2025} use information-theoretic estimators on aligned speech-text corpora to show that prosodic features encode roughly 1--2 bits per word of mutual information with the text, and that the redundancy varies systematically with linguistic context: it is highest at phrase boundaries and on accented syllables, and lowest in mid-phrase function words. The implication is that prosody is partially predictable from text but not derivable from it, and that the residual --- the prosodic information that is not redundant with text --- is concentrated at the same syllable-level landmarks that AM theory identifies as carrying linguistic information. This converges with the developmental and processing literatures from a different methodological direction.
+
+\subsection{The gap in current language models}
+
+Modern transformer language models trained on text alone have absorbed a substantial portion of the linguistic structure that text-distribution statistics encode \citep{vaswani2017, brown2020, touvron2023}, and have been shown to predict aspects of human neural activity during language processing \citep{goldstein2022, caucheteux2023}. Their training regime is silent: such models never observe a pitch contour, a focus accent, or a boundary tone. Recent multimodal speech-language models \citep{hassid2023textually, defossez2024moshi, lin2025prosodylm} have begun to integrate prosodic information, but at the wrong granularity for AM-aligned analysis. \citet{lin2025prosodylm} represent each utterance as a text section followed by a section of word-level discrete prosody tokens, discarding the within-word peak alignment that distinguishes accent types. \citet{kharitonov2022pgslm} discretise prosody at the segment level (one duration token and one mean-log-F0 token per HuBERT segment after run-length encoding), aggregating across what is in general not a syllable. \citet{hsu2021hubert} apply self-supervised audio tokenisation that strips much of the prosodic content from the resulting units; \citet{defossez2024moshi} stack audio codec tokens that entangle speaker, content, and prosody in a single representation, defeating the experimental separation needed to study prosody as an independent factor.
+
+Four observations therefore converge on the research programme I propose: prosody is developmentally and computationally central for human language users; AM theory locates prosodic events at the syllable; an information-theoretic residual of prosodic structure is not derivable from text; and no current language model incorporates that information at the right granularity. The chapters that follow lay out the goals, the architecture and empirical scaffolding I have built in service of them, and the next steps.
+
+% =============================================================================
+\section{Goals and Potential Consequences}\label{sec:goals}
+
+The long-term goal of this research programme is a \emph{prosody-aware foundation language model}: a pretrained language model whose training included prosodic structure at the syllable level, which has developed a functional text-only inference pathway alongside a joint-channel one through modality dropout, and which therefore exploits prosodic priors when consuming non-speech text at inference time. The case for pursuing such a model rests on four classes of consequence, summarised below.
+
+\subsection{Scientific consequences}
+
+A successful prosody-aware foundation model would constitute a computational substrate for an under-explored class of linguistic phenomena. Most current work on prosody-text relations is descriptive, behavioural, or information-theoretic; a working model with internalised prosodic representations becomes a hypothesis-generation engine for testing claims about pragmatic interpretation, focus and contrast, illocutionary force, and register. Three concrete uses follow directly from such a model. First, the model-derived probabilities can be used to predict human reading-time data, providing a behavioural test of whether the model's text-only inference recapitulates implicit-prosody reading-time effects \citep{breen2014review, glushko2022}. Second, the learned representations can be probed for the AM-theoretic categories (pitch accents, break indices, boundary tones) without supervision against ToBI labels, providing a fresh empirical test of those categories' psychological reality. Third, the model's residual information about prosody given text-only inference can be quantified directly, complementing the redundancy estimates of \citet{wolf2023, wolf2025} with a generative measurement.
+
+A prosody-aware foundation model also opens a tractable computational entry point into the inner-speech and implicit-prosody literatures. Because the same pretrained encoder can be probed text-only, both with and without prosody at inference, the model functions as an experimental apparatus for studying \emph{which} prosodic phenomena --- accent, phrasing, boundary tone, contour shape --- contribute to text-only inference. If the discovery experiment yields a positive result, this kind of follow-up is direct.
+
+\subsection{Practical and clinical consequences}
+
+The practical applications of a model that can attribute prosodic structure to non-speech text are extensive. Voice user interfaces and conversational agents currently consume only the orthographic transcript produced by an upstream speech recogniser; prosodic cues that a competent listener treats as indispensable are discarded prior to language understanding. A frustrated speaker's high-pitched, pause-heavy utterance is, on this regime, indistinguishable from a calm utterance with the same word string. A text model that has internalised the relationship between prosody and text could be deployed alongside a speech recogniser to recover the discarded prosodic information from text alone --- or, more cleanly, could replace the text-only language understanding stage with a prosody-aware one that operates directly on prosody-augmented transcripts.
+
+The clinical literature reinforces the case. Prosodic structure is informative about a range of conditions including the schizophrenia spectrum \citep{lucarini2020}, autism spectrum dysprosody, depression-related affective flattening, and Parkinson's-related vocal monotony. Standardised prosody-aware screening, currently performed by clinicians by ear, could be augmented by automatic prosody-aware classifiers that exploit the structure a foundation model has learned during pretraining. A reproducible representation of prosodic structure that survives at text-only inference also benefits accessibility: text-to-speech systems for blind or low-vision users currently produce flat, intent-poor synthesised speech because they have no model of the intended pragmatic structure of the input text; a prosody-aware foundation model would be the natural source of intent for such systems.
+
+Tasks that current text-only models systematically miss --- hedging, sincerity, irony, politeness, and register --- are routinely conveyed prosodically in spoken language. A prosody-aware foundation model would not solve these tasks immediately, but would provide a principled representation against which downstream systems can be built.
+
+\subsection{Methodological consequences}
+
+The research programme I propose is structured as a pre-registered discovery experiment. The methodological contribution is the experimental design itself: a three-encoder comparison (prosody-aware, text-only baseline, random-prosody control) under matched compute, with a pre-registered analysis plan, primary-versus-secondary probe distinction, and a finite committed list of architectural alternatives whose collective null result would constitute a robust negative for this experimental approach. This design addresses the well-documented difficulty of replicating speech-LM claims on shifted corpora and the broader difficulty of distinguishing useful inductive biases from generic regularisation in multimodal pretraining. Beyond the immediate study, the design is reusable: any future investigation of pretraining-time interventions on language models can adopt the same three-encoder logic.
+
+\subsection{Long-term consequences}
+
+The longer-term ambition is to extend the prosody-aware foundation model to multilingual coverage. Mandarin tone and French boundary tones are natural starting points: they require parametric specifications that differ structurally from English, and they test whether the prosody-aware pretraining transfers across prosodic systems with different categorical inventories. A multilingual prosody-aware foundation model would constitute, to my knowledge, the first general-purpose language model with prosody integrated as a first-class component of the representation. Whether such a model is achievable depends on the discovery experiment's outcome and on subsequent scaling work, both of which are within the doctoral-scale research programme set out in Section~\ref{sec:next}.
+
+% =============================================================================
+\section{Scaffolding for the Discovery}\label{sec:scaffolding}
+
+The work I have completed to date is preparatory infrastructure for the central discovery experiment. I describe here the parametric prosody specification, the architecture, the empirical scaffolding completed on MELD and AMI, and the discovery experiment planned on Switchboard NXT.
+
+\subsection{The parametric prosody specification}
+
+For each syllable in an utterance, I compute an 18-dimensional continuous vector that encodes the AM-theoretically relevant information available at that syllable. The specification draws together four established components: PoLaR-style pitch geometry \citep{mahrt2018polar}, Tilt-style event geometry \citep{taylor2000tilt}, energy and duration features z-scored against a per-speaker baseline \citep{honorof2005}, and boundary features in the spirit of \citet{wightman1992boundary}. Table~\ref{tab:dims} lists the dimensions.
+
+\begin{table}[h]
+    \centering
+    \small
+    \begin{tabular}{@{}l c p{0.62\textwidth}@{}}
+    \toprule
+    \textbf{Group} & \textbf{Dims} & \textbf{Features} \\
+    \midrule
+    Pitch geometry & 7 & onset, nucleus, offset F0; max, min, range; slope (semitones rel.\ speaker median) \\
+    Tilt-style event geometry & 4 & peak position (normalised), rise amp., fall amp., tilt $\in [-1, +1]$ \\
+    Energy & 2 & peak RMS, mean RMS (z-scored against speaker) \\
+    Duration & 2 & syllable duration, nucleus duration (z-scored against speaker) \\
+    Boundary & 3 & post-syllable pause, final-lengthening ratio, pitch reset to next syllable \\
+    \midrule
+    Voicing flag (companion) & 1 & fraction of voiced frames within the syllable \\
+    \bottomrule
+    \end{tabular}
+    \caption{The 18-dim per-syllable parametric prosody vector specification.}
+    \label{tab:dims}
+\end{table}
+
+The specification is fully deterministic, computed via Parselmouth \citep{jadoul2018parselmouth, boersma2001praat} with syllable-nucleus detection following \citet{dejong2009syllables}. Three commitments motivate the choice of a continuous parametric vector over discrete categorical labels. First, ToBI inter-annotator agreement is reported at approximately 88 percent on tonal-event presence and 81 percent on tonal-event type \citep{pitrelli1994, syrdal2000, yoon2004}, with chance-corrected coefficients of $\kappa \approx 0.71$ for binary prominence and $\kappa \approx 0.54$ for fine-grained accent-type distinctions \citep{breen2012reliability}; these agreement ceilings limit any model trained against ToBI labels. A continuous vector is constrained instead by the precision of the recording equipment. Second, my preliminary experiments (Section~\ref{sec:experiments-meld}) establish that continuous parametric vectors substantially outperform a discretised ToBI categorical representation for downstream emotion and question prediction; bucketing throws away gradient information that drives the model's success. Third, the specification matches the unit at which AM theory locates prosodic events: each entry in the vector is an interpretable physical quantity at the syllable level, enabling phonetically-grounded inspection of what the model has learned.
+
+\subsection{Architecture}
+
+The architecture I propose pretrains a transformer encoder on two parallel sub-word streams. At each phone position $p$ in an utterance, the input embedding concatenates: a discrete phone-token embedding (40-symbol ARPABET vocabulary, learned lookup, $\sim$256 dimensions); a linear projection of the 18-dimensional parametric prosody vector for the syllable that contains the phone, replicated to all phones in the syllable ($\sim$64 dimensions); and a 6-dimensional syllable-position feature combining sinusoidal-relative position with explicit boundary-distance saturation \citep{press2022alibi}. Each transformer layer additionally adds a prosody-modulated bias to its self-attention scores, $\text{score}(i, j) \mathrel{+}= \alpha_h \cdot \text{MLP}(\mathbf{p}_j)$, where $\mathbf{p}_j$ is the prosody vector at the attended position; this allows prosodic prominence to influence which positions the model attends to \citep{rajaa2023, menon2025}. Two output heads are attached: a softmax over phone tokens (cross-entropy on masked positions) and a regression head predicting the parametric vector at masked syllables (mean-squared error). With probability $p_{\text{drop}} = 0.2$ per training example, the entire prosody slice is zeroed to ensure the encoder develops a usable text-only inference pathway.
+
+I have validated the necessity of modality dropout empirically. On a synthetic toy dataset where prosody fully determines the label, a vanilla model without dropout achieves perfect accuracy with both channels but collapses to 28.4 percent at text-only inference --- worse than a text-only baseline at 42.9 percent. Modality dropout at $p = 0.2$ restores text-only performance to within the baseline confidence interval (42.3 percent) while preserving the joint-channel ceiling. This pathology and its resolution motivate the inclusion of modality dropout as an experimental device: it ensures that the resulting encoder has a meaningful text-only pathway against which a prosody-aware text-only inference can be compared.
+
+I do not advance modality dropout as a model of human language acquisition. Humans are not exposed to randomly prosody-blanked utterances. A more theoretically faithful operationalisation --- training the model first on full speech (prosody and phones together) and then continuing on text alone, analogous to a child first hearing speech and later reading silently --- is registered as a follow-up.
+
+\subsection{Empirical scaffolding on MELD}\label{sec:experiments-meld}
+
+I have validated the parametric vector specification on MELD \citep{poria2019meld}, a multi-speaker corpus of dialogue from television annotated with categorical emotion and sentiment labels. A supervised classification study compared three feature regimes on train$\to$test (9{,}444 / 2{,}490 utterances): text-only TF-IDF features yielded macro-F1 of $0.318$ on the seven-way emotion task and $0.601$ on three-way sentiment; prosody-only features pooled from the 18-dim parametric vector reached $0.127$ and $0.380$; the combined feature set added $+0.017$ on emotion and $+0.005$ on sentiment over text alone. The per-class breakdown is interpretable: prosody dominated the anger class (improving over text by $0.140$ macro-F1) while text dominated surprise (by $0.200$, with the difference driven by transcriber-added punctuation). A part-of-speech ablation isolated punctuation as the single most predictive POS in MELD's text features, accounting for a $17\%$ drop in emotion macro-F1 and $13\%$ in sentiment when removed. With punctuation removed, the prosody-only contribution to the combined model remained at $0.016$ macro-F1, indicating that prosody encodes information beyond what punctuation conveys.
+
+The most interpretable structural result concerns prosodic question marking. A logistic-regression probe trained on the last syllable's parametric vector predicted whether a MELD utterance ended in a question mark at AUC $0.6503$ on yes/no questions (bootstrap median $0.6494$, 95-percent CI $[0.6437, 0.6545]$, $n_{\text{boot}} = 200$); a sequence-aware bi-directional LSTM probe reached AUC $0.6890$. The top six coefficients of the linear probe matched the canonical phonetics of English yes/no questions exactly: rising final tilt (median $+0.31$, CI $[+0.21, +0.39]$), late F0 peak ($+0.16$, $[+0.09, +0.23]$), elevated baseline F0 ($+0.13$, $[+0.05, +0.19]$), elevated nucleus pitch ($+0.10$, $[+0.02, +0.21]$), reduced F0 range ($-0.10$, $[-0.15, -0.05]$), and shorter syllable duration ($-0.10$). Five of the leading coefficients have sign-stable 95-percent confidence intervals.
+
+A five-test validation suite was applied to this question-prediction result. Speaker-held-out cross-validation across 180 unique speakers yielded AUC $0.6299 \pm 0.0117$ across five folds, ruling out speaker-fingerprinting. Restricting the analysis to emotionally neutral utterances yielded AUC $0.6383$, ruling out an emotion-prosody confound. A position ablation found AUC $0.6503$ on the last syllable, $0.5490$ on a middle syllable, and $0.5653$ on the first syllable --- a $+0.10$ AUC localisation effect that demonstrates prosodic question-marking is concentrated at the boundary, exactly where AM theory locates the boundary tone. Restricting positives to wh-questions reduced AUC to $0.6004$, consistent with the canonical falling contour of wh-questions failing to match a probe trained on rises. The phonetic interpretation of the parametric vector is therefore statistically grounded.
+
+A separate diagnostic study isolated the prosodic correlates of the anger class. At the syllable level, the five F0 height dimensions dominated the ANOVA F-statistics by an order of magnitude over peak loudness ($F = 925$--$1357$ versus $F = 49$). At the utterance level, F0 nucleus pitch alone yielded AUC $0.67$ on the anger-versus-rest task. A drop-one-dimension ablation identified elevated baseline F0 and peak loudness as the load-bearing complementary dimensions. The result inverts a common informal expectation that anger is signalled by loudness and rate; the parametric vector identifies elevated pitch register as the dominant acoustic correlate, with peak loudness contributing secondarily.
+
+A separate architectural study examined whether richer probes could close the gap between prosody and text on emotion classification. A bi-directional LSTM outperformed pooled logistic regression by approximately $0.045$ macro-F1; attention pooling did not outperform mean pooling at this scale; frame-level F0 input added less than $0.01$ emotion macro-F1, indicating that the 18-dimensional parametric vector captures the load-bearing F0-derivable signal at MELD's utterance resolution; and a discretised ToBI categorical representation was the weakest probe of all ($0.094$ emotion, $0.279$ sentiment), confirming that bucketing the parametric vector throws away the gradient information that drives the model's success.
+
+The MELD scaffolding establishes that the parametric vector encodes linguistically-meaningful structure at phonetically-interpretable values, with bootstrap-stable coefficients and a position-localised question-marking signal. It does \emph{not} establish that prosody-aware pretraining improves text-only inference; that claim awaits the discovery experiment.
+
+\subsection{Cross-corpus replication on AMI}
+
+I applied the same parametric extraction pipeline to the AMI Meeting Corpus \citep{carletta2007ami}, focusing on a 30-meeting subset across the corpus's three recording sites (Edinburgh, Idiap, TNO/Twente). Re-extraction at the dialogue-act level produced 20{,}572 act-aligned segments. On AMI's \texttt{Elicit-Inform} dialogue act --- the canonical question-asking act in AMI's annotation scheme --- the prosody-only AUC was $0.658$ (pooled logistic regression), $0.576$ (last-syllable linear regression), and $0.676$ (bi-directional LSTM with mean pooling). For apples-to-apples comparison, the same v1 probe rerun on MELD yielded $0.586$ on yes/no questions; the cross-corpus gap on the last-syllable probe is $-0.010$ at v1 quality. Combined text+prosody on AMI's \texttt{Elicit-Inform} added $+0.027$ macro-F1 over text alone, modestly larger than the $+0.017$ uplift on MELD emotion. A v2 (MFA-aligned) replication is in progress at the time of writing and will be reported in an amendment to this proposal.
+
+Two findings from the AMI replication are worth highlighting. First, the cross-corpus signal at v1 syllabification quality is comparable across corpora, suggesting that the corpus difference between acted MELD and spontaneous AMI is not the bottleneck on prosody-aware question detection at this scale. Second, the position-ablation localisation observed on MELD does not cleanly replicate on AMI per-segment data; whether this is a corpus-specific artefact, a syllabification-quality issue, or a consequence of AMI's segment-level annotation granularity is the question the v2 replication addresses.
+
+\subsection{The discovery experiment, planned on Switchboard NXT}\label{sec:nxt-experiment}
+
+The central discovery experiment in this research programme is planned on Switchboard NXT \citep{calhoun2010nxt}, the NXT-format re-annotation of the Switchboard Corpus, which uniquely combines telephone-conversation speech with ToBI gold-standard prosodic transcription, dialogue-act annotation, and \emph{kontrast} (focus and contrast) labels. NXT enables the experimental design that MELD and AMI cannot support.
+
+The design pretrains three encoders under matched compute and data conditions. The prosody-aware encoder receives phone-tokenised input, the 18-dim parametric prosody vector, and modality dropout at $p = 0.2$. The text-only baseline receives phone-tokenised input only. The random-prosody control receives the same input as the prosody-aware encoder, with parametric vectors randomly permuted across positions before being fed to the model; this control discriminates effects that derive from the structured relationship between prosody and segmental content from effects that derive from generic regularisation, auxiliary-task benefit, or input dropout.
+
+At evaluation, all three encoders are frozen. The prosody slice of the prosody-aware encoder's input is zeroed throughout, simulating the absence of prosody at inference. A linear probe is trained on each encoder's hidden states for each downstream task. The primary probing task is NXT \emph{kontrast} --- the canonical implicit-prosody domain in this corpus, where the experimental result is most directly interpretable. Secondary probes include NXT dialogue-act classification, AMI \texttt{Elicit-Inform} prediction, MELD emotion classification, and a curated minimal-pair test set probing statement-versus-question and rhetorical interpretation. Bootstrap confidence intervals are reported over five training seeds, alongside per-class breakdowns and speaker-held-out splits via GroupKFold.
+
+The cleanest discovery signal is a configuration in which the prosody-aware encoder's text-only probe outperforms both the text-only baseline and the random-prosody control on the primary probe at the pre-registered effect-size threshold ($\geq 0.05$ macro-F1, $p < 0.01$ over five seeds). Any other configuration --- a tie with the random-prosody control, an effect on secondary tasks only, or a null result --- has its own pre-registered interpretation, recorded in advance \citep{munafo2017regreports}.
+
+If the discovery experiment yields a null result, this constitutes a failure of the proposed architecture and training regime to recover prosody-aware representations at text-only inference. It does not falsify the implicit-prosody hypothesis as a psycholinguistic claim. A pre-committed, finite set of alternatives is then evaluated as a follow-up: cross-attention between the two streams in place of the per-position concatenation, disentanglement losses that decouple speaker information from prosody at training time, and a sequential training paradigm in which the model is first trained on speech and then continued on text alone. Collective failure of the original PILM together with these three alternatives would constitute a robust negative result for this experimental approach.
+
+% =============================================================================
+\section{Next Steps}\label{sec:next}
+
+The immediate next steps are bounded by data availability. The AMI v2 (MFA-aligned) replication is in flight at the time of writing. Switchboard NXT licensing is pending UW institutional clearance for LDC97S62 (audio) and LDC2009T26 (NXT annotations); the parametric extraction pipeline is corpus-agnostic and will run on NXT day-one. Pre-registration of the analysis plan on the Open Science Framework \citep{munafo2017regreports} is intended to occur before pretraining begins.
+
+The build phase implements the architecture described in Section~\ref{sec:scaffolding}: an encoder of moderate size (preliminary specifications: 4--8 transformer layers, hidden dimension 256--384, total parameter budget 30--80 million), with the prosody-modulated attention bias and the dual masked-language-modelling objective. Pretraining proceeds on the union of the parametric outputs from MELD, AMI, and Switchboard NXT, with the same-compute text-only baseline and random-prosody control trained in parallel. This stage is estimated at approximately two months of compute, single-GPU.
+
+The discovery experiment then probes all three encoders on the primary and secondary tasks specified in Section~\ref{sec:nxt-experiment}. A positive result motivates the scaling phase: a larger encoder pretrained on a larger speech corpus (LibriSpeech 960, \citealt{panayotov2015librispeech}; or GigaSpeech, \citealt{chen2021gigaspeech}), with the probing battery repeated to confirm that the effect persists at scale. A null result triggers the pre-committed alternative-architecture follow-up.
+
+The doctoral-scale extensions are anticipated to span approximately three to four years, and are sequenced so that each builds on the deliverables of the prior phase. A generation-side chapter activates the decoder branch of the encoder-decoder architecture for autoregressive prosody generation, with a discrete prosody auxiliary output head obtained by k-means or VQ-VAE clustering of the 18-dimensional space \citep{vandenoord2017vqvae}. A comparative-typology chapter generalises the parametric specification to languages whose prosodic systems differ structurally from English, with Mandarin tone and French boundary tones as natural starting points. A behaviour-bridging chapter links the model's text-only inference to human reading-time data, providing a behavioural test of whether that inference recapitulates the reading-time effects reported in the implicit-prosody literature \citep{breen2014review, glushko2022}. Selected secondary threads --- a community-resource pragmatic minimal-pair test corpus and clinical applications drawing on the prosody-as-diagnostic literature \citep{lucarini2020} --- are flagged as candidates rather than commitments.
+
+\paragraph{Resources.} The development environment is in place: the AMI Meeting Corpus is locally mirrored, the MELD parametric pipeline (v1 and MFA-aligned v2) is operational, CMU pronouncing dictionary integration is complete, Praat-driven syllable-nucleus extraction has been validated, and Montreal Forced Aligner output is functional for English. Compute resources for the scaling phase will be determined upon completion of the discovery experiment; institutional options are available at the host university.
+
+\paragraph{Background and trajectory.} My interdisciplinary background supports this trajectory. Prior graduate work in Neuroscience and Education at Teachers College, Columbia University, and an undergraduate degree in Philosophy from the University of S\~{a}o Paulo, Brazil, are complemented by a decade of professional experience in artificial intelligence research and design across multiple major technology firms, including extended work on conversational and voice-user-interface systems --- where the practical motivation for the present research first emerged. Current Master's-level work in the Computational Linguistics programme at the University of Washington has produced the empirical scaffolding summarised in Section~\ref{sec:scaffolding}. A transition to a doctoral programme would extend this trajectory rather than redirect it; the University of Washington is a natural institutional home, given that the NXT-format Switchboard corpus was co-developed at UW \citep{calhoun2010nxt} and the local concentration of speech-prosody and computational-psycholinguistics expertise provides an appropriate collaborative environment.
+
+% =============================================================================
+\section*{Bibliography}
+
+\begin{thebibliography}{99}\small
+
+\bibitem[Alderson-Day and Fernyhough(2015)]{aldersondayfernyhough2015}
+B.~Alderson-Day and C.~Fernyhough.
+\newblock Inner speech: Development, cognitive functions, phenomenology, and neurobiology.
+\newblock {\em Psychological Bulletin}, 141(5):931--965, 2015.
+
+\bibitem[Beckman and Ayers(1997)]{beckman1997}
+M.~Beckman and G.~Ayers.
+\newblock Guidelines for ToBI labelling, version 3.0.
+\newblock Technical report, Ohio State University, 1997.
+
+\bibitem[Beckman and Pierrehumbert(1986)]{beckman1986}
+M.~Beckman and J.~Pierrehumbert.
+\newblock Intonational structure in {Japanese} and {English}.
+\newblock {\em Phonology Yearbook}, 3:255--309, 1986.
+
+\bibitem[Beckman(1996)]{beckman1996}
+M.~E.\ Beckman.
+\newblock The parsing of prosody.
+\newblock {\em Language and Cognitive Processes}, 11(1--2):17--68, 1996.
+
+\bibitem[Bishop(2021)]{bishop2021}
+J.~Bishop.
+\newblock Exploring the similarity between implicit and explicit prosody: Prosodic phrasing and individual differences.
+\newblock {\em Language and Speech}, 64(4):873--899, 2021.
+
+\bibitem[Boersma(2001)]{boersma2001praat}
+P.~Boersma.
+\newblock {Praat}, a system for doing phonetics by computer.
+\newblock {\em Glot International}, 5(9/10):341--345, 2001.
+
+\bibitem[Breen(2014)]{breen2014review}
+M.~Breen.
+\newblock Empirical investigations of the role of implicit prosody in sentence processing.
+\newblock {\em Language and Linguistics Compass}, 8(2):37--50, 2014.
+
+\bibitem[Breen et~al.(2012)]{breen2012reliability}
+M.~Breen, L.~Dilley, J.~Kraemer, and E.~Gibson.
+\newblock Inter-transcriber reliability for two systems of prosodic annotation: {ToBI} and {RaP}.
+\newblock {\em Corpus Linguistics and Linguistic Theory}, 8(2):277--312, 2012.
+
+\bibitem[Brown et~al.(2020)]{brown2020}
+T.~Brown et~al.
+\newblock Language models are few-shot learners.
+\newblock In {\em NeurIPS}, 2020.
+
+\bibitem[Calhoun et~al.(2010)]{calhoun2010nxt}
+S.~Calhoun, J.~Carletta, J.~Brenier, N.~Mayo, D.~Jurafsky, M.~Steedman, and D.~Beaver.
+\newblock The {NXT}-format Switchboard corpus.
+\newblock {\em Language Resources and Evaluation}, 44(4):387--419, 2010.
+
+\bibitem[Carletta(2007)]{carletta2007ami}
+J.~Carletta.
+\newblock Unleashing the killer corpus: experiences in creating the multi-everything {AMI} meeting corpus.
+\newblock {\em Language Resources and Evaluation}, 41(2):181--190, 2007.
+
+\bibitem[Caucheteux et~al.(2023)]{caucheteux2023}
+C.~Caucheteux, A.~Gramfort, and J.-R. King.
+\newblock Evidence of a predictive coding hierarchy in the human brain listening to speech.
+\newblock {\em Nature Human Behaviour}, 7(3):430--441, 2023.
+
+\bibitem[Chen et~al.(2021)]{chen2021gigaspeech}
+G.~Chen et~al.
+\newblock {GigaSpeech}: An evolving multi-domain {ASR} corpus.
+\newblock In {\em Interspeech}, 2021.
+
+\bibitem[Cutler et~al.(1997)]{cutler1997}
+A.~Cutler, D.~Dahan, and W.~van~Donselaar.
+\newblock Prosody in the comprehension of spoken language: a literature review.
+\newblock {\em Language and Speech}, 40(2):141--201, 1997.
+
+\bibitem[Glushko et~al.(2022)]{glushko2022}
+A.~Glushko et~al.
+\newblock The role of phrase-level prosody in silent reading: an event-related potential study.
+\newblock {\em Scientific Reports}, 12:14702, 2022.
+
+\bibitem[Jun(2010)]{jun2010}
+S.-A.\ Jun.
+\newblock The implicit prosody hypothesis and overt prosody in {English}.
+\newblock {\em Language and Cognitive Processes}, 25(7--9):1201--1233, 2010.
+
+\bibitem[Menon(2025)]{menon2025}
+N.~Menon.
+\newblock Prosodic-based turn detection using the audio spectrogram transformer.
+\newblock {\em Technical Disclosure Commons}, paper~8792, October 2025.
+
+\bibitem[Nedergaard and Lupyan(2024)]{nedergaard2024}
+J.~Nedergaard and G.~Lupyan.
+\newblock Anendophasia and its relationship with cognitive performance.
+\newblock {\em Psychological Science}, 35(7):780--797, 2024.
+
+\bibitem[Pitrelli et~al.(1994)]{pitrelli1994}
+J.~Pitrelli, M.~Beckman, and J.~Hirschberg.
+\newblock Evaluation of prosodic transcription labelling reliability in the {ToBI} framework.
+\newblock In {\em Proc.\ ICSLP}, 1994.
+
+\bibitem[Press et~al.(2022)]{press2022alibi}
+O.~Press, N.~A.\ Smith, and M.~Lewis.
+\newblock Train short, test long: attention with linear biases enables input length extrapolation.
+\newblock In {\em ICLR}, 2022.
+
+\bibitem[Rajaa(2023)]{rajaa2023}
+S.~Rajaa.
+\newblock Improving end-to-end {SLU} performance with prosodic attention and distillation.
+\newblock In {\em Interspeech}, 2023. arXiv:2305.08067.
+
+\bibitem[Syrdal and McGory(2000)]{syrdal2000}
+A.~K.\ Syrdal and J.~McGory.
+\newblock Inter-transcriber reliability of {ToBI} prosodic labeling.
+\newblock In {\em Proc.\ ICSLP}, 2000.
+
+\bibitem[Wolf et~al.(2023)]{wolf2023}
+L.~Wolf, T.~Pimentel, E.~Fedorenko, and E.~G.\ Wilcox.
+\newblock Quantifying the redundancy between prosody and text.
+\newblock In {\em EMNLP}, 2023. arXiv:2311.17233.
+
+\bibitem[Wolf et~al.(2025)]{wolf2025}
+L.~Wolf, T.~Pimentel, E.~Fedorenko, and E.~G.\ Wilcox.
+\newblock The time scale of redundancy between prosody and linguistic context.
+\newblock arXiv:2503.11630, 2025.
+
+\bibitem[Yoon et~al.(2004)]{yoon2004}
+T.-J.\ Yoon, S.~Chavarr{\'\i}a, J.~Cole, and M.~Hasegawa-Johnson.
+\newblock Intertranscriber reliability of prosodic labeling on telephone conversation using {ToBI}.
+\newblock In {\em Interspeech}, 2004.
+
+\bibitem[de~Jong and Wempe(2009)]{dejong2009syllables}
+N.~de~Jong and T.~Wempe.
+\newblock {Praat} script to detect syllable nuclei and measure speech rate automatically.
+\newblock {\em Behavior Research Methods}, 41(2):385--390, 2009.
+
+\bibitem[D{\'e}fossez et~al.(2024)]{defossez2024moshi}
+A.~D{\'e}fossez, L.~Mazar{\'e}, M.~Orsini, et~al.
+\newblock {Moshi}: a speech-text foundation model for real-time dialogue.
+\newblock arXiv:2410.00037, 2024.
+
+\bibitem[Fernyhough(2016)]{fernyhough2016}
+C.~Fernyhough.
+\newblock {\em The Voices Within: The History and Science of How We Talk to Ourselves}.
+\newblock Basic Books, 2016.
+
+\bibitem[Fodor(2002)]{fodor2002}
+J.~D.\ Fodor.
+\newblock Psycholinguistics cannot escape prosody.
+\newblock In {\em Speech Prosody 2002}, 2002.
+
+\bibitem[Goldstein et~al.(2022)]{goldstein2022}
+A.~Goldstein et~al.
+\newblock Shared computational principles for language processing in humans and deep language models.
+\newblock {\em Nature Neuroscience}, 25(3):369--380, 2022.
+
+\bibitem[Hassid et~al.(2023)]{hassid2023textually}
+M.~Hassid et~al.
+\newblock Textually pretrained speech language models.
+\newblock In {\em NeurIPS}, 2023. arXiv:2305.13009.
+
+\bibitem[Hirschberg and Pierrehumbert(1986)]{hirschberg1986}
+J.~Hirschberg and J.~Pierrehumbert.
+\newblock The intonational structuring of discourse.
+\newblock In {\em Proc.\ 24th Annual Meeting of the Association for Computational Linguistics}, pages 136--144, 1986.
+
+\bibitem[Honorof and Whalen(2005)]{honorof2005}
+D.~Honorof and D.~Whalen.
+\newblock Perception of pitch location within a speaker's {F0} range.
+\newblock {\em Journal of the Acoustical Society of America}, 117(4):2193--2200, 2005.
+
+\bibitem[Hsu et~al.(2021)]{hsu2021hubert}
+W.-N. Hsu et~al.
+\newblock {HuBERT}: Self-supervised speech representation learning by masked prediction of hidden units.
+\newblock {\em IEEE/ACM TASLP}, 29:3451--3460, 2021.
+
+\bibitem[Jadoul et~al.(2018)]{jadoul2018parselmouth}
+Y.~Jadoul, B.~Thompson, and B.~de~Boer.
+\newblock Introducing {Parselmouth}: A {Python} interface to {Praat}.
+\newblock {\em Journal of Phonetics}, 71:1--15, 2018.
+
+\bibitem[Kharitonov et~al.(2022)]{kharitonov2022pgslm}
+E.~Kharitonov et~al.
+\newblock Text-free prosody-aware generative spoken language modeling.
+\newblock In {\em ACL}, 2022.
+
+\bibitem[Lake et~al.(2017)]{lake2017}
+B.~M.\ Lake, T.~D.\ Ullman, J.~B.\ Tenenbaum, and S.~J.\ Gershman.
+\newblock Building machines that learn and think like people.
+\newblock {\em Behavioral and Brain Sciences}, 40:e253, 2017.
+
+\bibitem[Lucarini et~al.(2020)]{lucarini2020}
+V.~Lucarini, M.~Grice, F.~Cangemi, J.~T.\ Zimmermann, C.~Marchesi, K.~Vogeley, and M.~Tonna.
+\newblock Speech prosody as a bridge between psychopathology and linguistics: The case of the schizophrenia spectrum.
+\newblock {\em Frontiers in Psychiatry}, 11:531863, 2020.
+
+\bibitem[Qian et~al.(2025)]{lin2025prosodylm}
+K.~Qian, X.~Fan, J.~Ni, S.~Shechtman, M.~Hasegawa-Johnson, C.~Gan, and Y.~Zhang.
+\newblock {ProsodyLM}: Uncovering the emerging prosody processing capabilities in speech language models.
+\newblock arXiv:2507.20091, 2025. Accepted at COLM 2025.
+
+\bibitem[Liu et~al.(2019)]{liu2019linguistic}
+N.~F.\ Liu, M.~Gardner, Y.~Belinkov, M.~E.\ Peters, and N.~A.\ Smith.
+\newblock Linguistic knowledge and transferability of contextual representations.
+\newblock In {\em NAACL}, 2019.
+
+\bibitem[Mahrt(2018)]{mahrt2018polar}
+T.~Mahrt.
+\newblock {PoLaR}: A standard for points, levels, and ranges.
+\newblock In {\em Speech Prosody 2018}, 2018.
+
+\bibitem[Munaf{\`o} et~al.(2017)]{munafo2017regreports}
+M.~R.\ Munaf{\`o} et~al.
+\newblock A manifesto for reproducible science.
+\newblock {\em Nature Human Behaviour}, 1(1):0021, 2017.
+
+\bibitem[Neverova et~al.(2016)]{neverova2016}
+N.~Neverova, C.~Wolf, G.~W.\ Taylor, and F.~Nebout.
+\newblock {ModDrop}: adaptive multi-modal gesture recognition.
+\newblock {\em IEEE TPAMI}, 38(8):1692--1706, 2016.
+
+\bibitem[Panayotov et~al.(2015)]{panayotov2015librispeech}
+V.~Panayotov, G.~Chen, D.~Povey, and S.~Khudanpur.
+\newblock {LibriSpeech}: An {ASR} corpus based on public domain audio books.
+\newblock In {\em ICASSP}, 2015.
+
+\bibitem[Pinker(1994)]{pinker1994}
+S.~Pinker.
+\newblock {\em The Language Instinct: How the Mind Creates Language}.
+\newblock HarperCollins, 1994.
+
+\bibitem[Prieto and Esteve-Gilbert(2018)]{prieto2018}
+P.~Prieto and N.~Esteve-Gilbert (Eds.).
+\newblock {\em The Development of Prosody in First Language Acquisition}.
+\newblock John Benjamins, 2018.
+
+\bibitem[Pierrehumbert(1980)]{pierrehumbert1980}
+J.~Pierrehumbert.
+\newblock {\em The Phonology and Phonetics of English Intonation}.
+\newblock PhD thesis, MIT, 1980.
+
+\bibitem[Pierrehumbert and Hirschberg(1990)]{pierrehumbert1990}
+J.~Pierrehumbert and J.~Hirschberg.
+\newblock The meaning of intonational contours in the interpretation of discourse.
+\newblock In {\em Intentions in Communication}. MIT Press, 1990.
+
+\bibitem[Poria et~al.(2019)]{poria2019meld}
+S.~Poria, D.~Hazarika, N.~Majumder, G.~Naik, E.~Cambria, and R.~Mihalcea.
+\newblock {MELD}: A multimodal multi-party dataset for emotion recognition in conversations.
+\newblock In {\em ACL}, 2019.
+
+\bibitem[Rosenberg(2010)]{rosenberg2010autobi}
+A.~Rosenberg.
+\newblock {AuToBI}: a tool for automatic {ToBI} annotation.
+\newblock In {\em Interspeech}, 2010.
+
+\bibitem[Selkirk(1995)]{selkirk1995focus}
+E.~Selkirk.
+\newblock Sentence prosody: Intonation, stress, and phrasing.
+\newblock In {\em The Handbook of Phonological Theory}. Blackwell, 1995.
+
+\bibitem[Shi et~al.(2022)]{shi2022learning}
+B.~Shi, W.-N.\ Hsu, and A.~Mohamed.
+\newblock Learning lip-based audio-visual speaker embeddings with av-hubert.
+\newblock In {\em Interspeech}, 2022.
+
+\bibitem[Spelke(2022)]{spelke2022}
+E.~S.\ Spelke.
+\newblock {\em What Babies Know: Core Knowledge and Composition}.
+\newblock Oxford University Press, 2022.
+
+\bibitem[Spelke and Kinzler(2007)]{spelke2007}
+E.~S.\ Spelke and K.~D.\ Kinzler.
+\newblock Core knowledge.
+\newblock {\em Developmental Science}, 10(1):89--96, 2007.
+
+\bibitem[Snedeker and Trueswell(2003)]{snedeker2003}
+J.~Snedeker and J.~Trueswell.
+\newblock Using prosody to avoid ambiguity: Effects of speaker awareness and referential context.
+\newblock {\em Journal of Memory and Language}, 48(1):103--130, 2003.
+
+\bibitem[Silverman et~al.(1992)]{silverman1992}
+K.~Silverman et~al.
+\newblock {ToBI}: A standard for labeling {English} prosody.
+\newblock In {\em ICSLP}, 1992.
+
+\bibitem[Taylor(2000)]{taylor2000tilt}
+P.~Taylor.
+\newblock Analysis and synthesis of intonation using the {Tilt} model.
+\newblock {\em Journal of the Acoustical Society of America}, 107(3):1697--1714, 2000.
+
+\bibitem[Tenney et~al.(2019)]{tenney2019probing}
+I.~Tenney et~al.
+\newblock What do you learn from context? Probing for sentence structure in contextualized word representations.
+\newblock In {\em ICLR}, 2019.
+
+\bibitem[Touvron et~al.(2023)]{touvron2023}
+H.~Touvron et~al.
+\newblock {Llama 2}: open foundation and fine-tuned chat models.
+\newblock arXiv:2307.09288, 2023.
+
+\bibitem[van~den~Oord et~al.(2017)]{vandenoord2017vqvae}
+A.~van~den~Oord, O.~Vinyals, and K.~Kavukcuoglu.
+\newblock Neural discrete representation learning.
+\newblock In {\em NeurIPS}, 2017.
+
+\bibitem[Vaswani et~al.(2017)]{vaswani2017}
+A.~Vaswani et~al.
+\newblock Attention is all you need.
+\newblock In {\em NeurIPS}, 2017.
+
+\bibitem[Wightman et~al.(1992)]{wightman1992boundary}
+C.~Wightman, S.~Shattuck-Hufnagel, M.~Ostendorf, and P.~Price.
+\newblock Segmental durations in the vicinity of prosodic phrase boundaries.
+\newblock {\em Journal of the Acoustical Society of America}, 91(3):1707--1717, 1992.
+
+\end{thebibliography}
+
+\end{document}
